@@ -1,3 +1,4 @@
+import time
 import hcl
 import os
 import re
@@ -486,15 +487,20 @@ class Validator:
         else:
             source = source_string
         repo_temp_dir = source.split("/")[-1]
-        if 'refs' in locals():
-            refs = refs.split('=')[-1]
-            directory = directory+'-'+refs
         if os.name == 'nt':  ## This is the one place where my code is different for windows.
             directory = "c:\\temp\\terraform_validate\\" + repo_temp_dir
         else:
             directory = '/tmp/terraform_validate/'+repo_temp_dir
-        if os.stat(directory):
+        if 'refs' in locals():
+            refs = refs.split('=')[-1]
+            if "//" in refs:
+                refs = refs.split('//')[0]
+            directory = directory+'-'+refs
+        try:
+            os.stat(directory)
             shutil.rmtree(directory, ignore_errors=True) ## clean slate, unless a unique directory.
+        except:
+            pass
         os.makedirs(directory)
         repo = git.Git(directory)
         repo.clone(source, directory) ## by default, this checks out master.
@@ -536,19 +542,20 @@ class Validator:
                     try:
                         hcl.loads(new_terraform)
                     except ValueError as e:
-                        raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(directory,file),e))
+                        raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(directory,fole),e))
                     modules_to_process = self.check_terraform_for_modules(new_terraform)
                     terraform_string += new_terraform
                     if (modules_to_process is not None):
                         for module_directory in modules_to_process:
-                            for directory, subdirectories, files in os.walk(module_directory):
-                                for file in files:
-                                    if (file.endswith(".tf")):
+                            for mod_directory, mod_subdirectories, mod_files in os.walk(module_directory):
+                                for mod_file in mod_files:
+                                    if (mod_file.endswith(".tf")):
+                                        module_terraform = self.read_terraform_file(mod_directory+"/"+mod_file)
                                         try:
-                                            module_terraform = self.read_terraform_file(directory+"/"+file)
                                             hcl.loads(module_terraform)
                                         except ValueError as e:
-                                           raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(directory,file),e))
+                                             
+                                            raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(mod_directory,foole),e))
                                    
                         terraform_string += new_terraform
         terraform = hcl.loads(terraform_string)
