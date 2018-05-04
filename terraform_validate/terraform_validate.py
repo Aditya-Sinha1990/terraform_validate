@@ -542,7 +542,7 @@ class Validator:
                     try:
                         hcl.loads(new_terraform)
                     except ValueError as e:
-                        raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(directory,fole),e))
+                        raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(directory,file),e))
                     modules_to_process = self.check_terraform_for_modules(new_terraform)
                     terraform_string += new_terraform
                     if (modules_to_process is not None):
@@ -555,7 +555,7 @@ class Validator:
                                             hcl.loads(module_terraform)
                                         except ValueError as e:
                                              
-                                            raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(mod_directory,foole),e))
+                                            raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(mod_directory,mod_file),e))
                                    
                         terraform_string += new_terraform
         terraform = hcl.loads(terraform_string)
