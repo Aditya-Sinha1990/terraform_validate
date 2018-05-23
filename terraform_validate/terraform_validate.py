@@ -1,6 +1,8 @@
 import time
 import hcl
 import os
+import glob
+import random
 import re
 import sys
 import shutil
@@ -479,7 +481,7 @@ class Validator:
         ### with incorrect or outdated data being kept around.
         ### In the future, I would like to turn some of these parts
         ### into functions to make them reusable for other repo types.
-
+        constant_random = str(random.randint(1,999999))+"-"
         if source_string.startswith("git::"): ## pull apart the source string to make it a directory name
             source_string = source_string[5:]
         if "?" in source_string: ## if theres a ?ref=<branch or commit>, use that for the dir name.
@@ -488,9 +490,9 @@ class Validator:
             source = source_string
         repo_temp_dir = source.split("/")[-1]
         if os.name == 'nt':  ## This is the one place where my code is different for windows.
-            directory = "c:\\temp\\terraform_validate\\" + repo_temp_dir
+            directory = "c:\\temp\\terraform_validate\\" +constant_random+repo_temp_dir
         else:
-            directory = '/tmp/terraform_validate/'+repo_temp_dir
+            directory = '/tmp/terraform_validate/'+constant_random+repo_temp_dir
         if 'refs' in locals():
             refs = refs.split('=')[-1]
             if "//" in refs:
@@ -508,13 +510,13 @@ class Validator:
             repo.checkout(refs) ## if a ref was specified, check it out.
         return directory
 
-    def check_terraform_for_modules(self,new_terraform):
+    def check_terraform_for_modules(self,new_terraform, path):
 
         ## terraform itself uses a git getter which essentially just uses the system's git
         ## in order to perform the get of repo and any submodules.
         ## since this is the method used, I am assuming that a similar method is acceptable here.
         ## we have gitpython; which makes similar assumptions to terraform.
-
+        ## This needs to be called multiple times - we have nested nested repos which is causing issues.
         modules_to_process = []
         terra_dictionary = hcl.loads(new_terraform)
         if ("module" in terra_dictionary):
@@ -522,9 +524,9 @@ class Validator:
                 if (isinstance(module, dict)):
                     for key, value in module.items():
                         if ("source" in key):
-                            if ((value.startswith(".")) or (value.startswith("/"))):
-                                modules_to_process.append(value)
-                            if '.git' or '::git' in (value):
+                            if (os.path.exists(os.path.join(path,value))):
+                                modules_to_process.append(os.path.join(path,value))
+                            elif ('.git' in value)  or ('::git' in value):
                                 modules_to_process.append(self.get_git_module(value))
         return modules_to_process
          
@@ -533,33 +535,45 @@ class Validator:
         ## It looks like we are repeating ourselves.  This is done to first process the initial directory
         ## and then gain the details for the modules.  Future modification may DRY this by separating
         ## it into different functions.  Alas, I have no more time to work on this.
-
+        ## A check to see if the TF file is over a certain size is used
+        ## to skip blank files, which Hashicorp say are OK.
         terraform_string = ""
-        for directory, subdirectories, files in os.walk(path):
-            for file in files:
-                if (file.endswith(".tf")):
-                    new_terraform = self.read_terraform_file(directory+"/"+file)
-                    try:
-                        hcl.loads(new_terraform)
-                    except ValueError as e:
-                        raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(directory,file),e))
-                    modules_to_process = self.check_terraform_for_modules(new_terraform)
-                    terraform_string += new_terraform
-                    if (modules_to_process is not None):
-                        for module_directory in modules_to_process:
-                            for mod_directory, mod_subdirectories, mod_files in os.walk(module_directory):
-                                for mod_file in mod_files:
-                                    if (mod_file.endswith(".tf")):
-                                        module_terraform = self.read_terraform_file(mod_directory+"/"+mod_file)
-                                        try:
-                                            hcl.loads(module_terraform)
-                                        except ValueError as e:
-                                             
-                                            raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(mod_directory,mod_file),e))
-                                   
-                        terraform_string += new_terraform
-        terraform = hcl.loads(terraform_string)
-        return terraform
+        for file in glob.glob(os.path.join(path,"*.tf")):
+            if (file.endswith(".tf")) and (os.stat(file).st_size > 20):
+                new_terraform = self.read_terraform_file(file)
+                try:
+                    hcl.loads(new_terraform)
+                except ValueError as e:
+                    raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(directory,file),e))
+                modules_to_process = self.check_terraform_for_modules(new_terraform, path)
+                terraform_string += new_terraform
+                while True:
+                    if len(modules_to_process)>0 :
+                        module_directory = modules_to_process.pop(0)
+                        for mod_file in glob.glob(os.path.join(module_directory, "*.tf")):
+                            if (os.stat(mod_file).st_size > 20):
+                                module_terraform = self.read_terraform_file(mod_file)
+                                try:
+                                    hcl.loads(module_terraform)
+                                    new_terraform+=module_terraform
+                                except ValueError as e:
+                                    raise TerraformSyntaxException("Invalid terraform configuration in {0}\n{1}".format(os.path.join(module_directory,mod_file),e))
+                                    pass
+                                new_modules = self.check_terraform_for_modules(module_terraform,module_directory)
+                                if len(new_modules) > 0:
+                                    modules_to_process.extend(new_modules)
+                    else:
+                         break
+                terraform_string += new_terraform
+        try:
+            terraform = hcl.loads(terraform_string)
+        except Exception as e:
+            print(e)
+        try:
+            return terraform
+        except NameError:
+            raise TerraformSyntaxException("No terraform configuration could be loaded")
+            return ""
 
     def get_terraform_resources(self, name, resources):
         if name not in resources.keys():
