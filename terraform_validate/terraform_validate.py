@@ -526,8 +526,9 @@ class Validator:
                         if ("source" in key):
                             if (os.path.exists(os.path.join(path,value))):
                                 modules_to_process.append(os.path.join(path,value))
-                            elif ('.git' in value)  or ('::git' in value):
+                            elif ('.git' in value)  or ('::git' in value) or ('git@' in value):
                                 modules_to_process.append(self.get_git_module(value))
+        print(modules_to_process)
         return modules_to_process
          
 
